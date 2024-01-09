@@ -1,0 +1,28 @@
+[package]
+name = "qkd_camera_streaming_client"
+version = "0.1.0"
+edition = "2021"
+include = ["src/**/*", "README.md"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "client"
+path = "src/client/main.rs"
+
+[[bin]]
+name = "server"
+path = "src/server/main.rs"
+
+[dependencies]
+simple_image_interface = { git = "https://github.com/thomasarmel/simple-image-interface-rs.git" }
+v4l = "0.14.0"
+image = "0.24.7"
+simplelog = "0.12.1"
+show-image = "0.13.1"
+turbojpeg = { version = "0.5.4", features = ["image"] }
+rustls = { features = ["default"], git = "https://github.com/thomasarmel/rustls.git", branch = "qkd"}
+rustls-pki-types = "1.1.0"
+rustls-native-certs = "0.7.0"
+rcgen = "0.12.0"
+webpki-roots = "0.26.0"

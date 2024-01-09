@@ -1,0 +1,1 @@
+`sudo apt install libudev-dev librust-alsa-sys-dev`
