@@ -4,6 +4,7 @@ use std::sync::Arc;
 use image::{ImageBuffer, Rgb};
 use rustls::server::Acceptor;
 use rustls::{ServerConfig, ServerConnection};
+use rustls::qkd_config::QkdServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use show_image::{create_window, ImageInfo, ImageView};
 
@@ -116,9 +117,13 @@ impl TestPki {
     }
 
     fn server_config(self) -> Arc<ServerConfig> {
-        let mut server_config = ServerConfig::builder().with_no_client_auth().with_single_cert(
-            vec![self.server_cert_der],
-            self.server_key_der).unwrap();
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_qkd_and_single_cert(vec![self.server_cert_der], self.server_key_der, &QkdServerConfig::new (
+            "localhost:3000",
+            "data/sae2.pfx",
+            "",
+            )).unwrap();
 
         server_config.key_log = Arc::new(rustls::KeyLogFile::new());
 

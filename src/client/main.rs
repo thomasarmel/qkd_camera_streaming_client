@@ -5,6 +5,7 @@ use std::sync::Arc;
 use image::{ImageBuffer, Rgb};
 use rustls::{ClientConnection, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::qkd_config::QkdClientConfig;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 use simple_image_interface::simple_image_interface::SimpleImageInterface;
@@ -31,9 +32,17 @@ fn main() {
             .cloned(),
     );
     let mut config = rustls::ClientConfig::builder()
-        .dangerous()
+        .with_root_certificates(root_store)
+        .with_qkd(
+            &QkdClientConfig::new(
+                "localhost:3000",
+                "data/sae1.pfx",
+                "",
+                2
+            )).unwrap();
+        /*.dangerous()
         .with_custom_certificate_verifier(Arc::new(NoVerifier {}))
-        .with_no_client_auth();
+        .with_no_client_auth();*/
 
     // Allow using SSLKEYLOGFILE.
     config.key_log = Arc::new(rustls::KeyLogFile::new());
