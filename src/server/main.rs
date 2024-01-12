@@ -4,7 +4,8 @@ use std::sync::Arc;
 use image::{ImageBuffer, Rgb};
 use rustls::server::Acceptor;
 use rustls::{ServerConfig, ServerConnection};
-use rustls::qkd_config::QkdServerConfig;
+use rustls::qkd_config::{QkdInitialServerConfig};
+use rustls::server::qkd::QkdServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use show_image::{create_window, ImageInfo, ImageView};
 
@@ -25,7 +26,8 @@ fn main() {
             }
         };
 
-        let mut conn = accepted.into_connection(server_config.clone()).unwrap();
+        let conn = accepted.into_qkd_connection(server_config.clone()).unwrap();
+        let mut conn = conn.complete_qkd_ack(&mut stream.try_clone().unwrap(), &mut stream.try_clone().unwrap());
         conn.complete_io(&mut stream).unwrap();
 
         manage_stream(conn, stream);
@@ -37,8 +39,8 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
     let window = create_window("image", Default::default()).unwrap();
 
     loop {
-
         while let Ok(size_read) = conn.read_tls(&mut stream) {
+            conn.process_new_packets().unwrap();
             if size_read == 0 {
                 println!("EOF");
                 break;
@@ -46,7 +48,7 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
             println!("Read {} bytes", size_read);
         }
 
-        conn.process_new_packets().unwrap();
+        //conn.process_new_packets().unwrap();
         let mut read_vec = Vec::new();
         let _ = conn.reader().read_to_end(&mut read_vec);
         println!("Vec read {} bytes", read_vec.len());
@@ -116,16 +118,16 @@ impl TestPki {
         }
     }
 
-    fn server_config(self) -> Arc<ServerConfig> {
+    fn server_config(self) -> Arc<QkdServerConfig> {
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_qkd_and_single_cert(vec![self.server_cert_der], self.server_key_der, &QkdServerConfig::new (
+            .with_qkd_and_single_cert(vec![self.server_cert_der], self.server_key_der, &QkdInitialServerConfig::new (
             "localhost:3000",
             "data/sae2.pfx",
             "",
             )).unwrap();
 
-        server_config.key_log = Arc::new(rustls::KeyLogFile::new());
+        server_config.set_key_log(Arc::new(rustls::KeyLogFile::new()));
 
         Arc::new(server_config)
     }

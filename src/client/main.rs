@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
+//use std::thread;
 use image::{ImageBuffer, Rgb};
 use rustls::{ClientConnection, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -63,7 +64,7 @@ fn main() {
         let compressed_image = turbojpeg::compress_image(&input_image, JPEG_COMPRESS_QUALITY, turbojpeg::Subsamp::Sub2x2).unwrap();
         println!("Compressed size: {}", compressed_image.len());
         tls.write_all(&compressed_image).unwrap();
-        //println!("{:?}", tls.conn.complete_io(tls.sock));
+        //thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
 
     }
 
