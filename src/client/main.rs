@@ -2,6 +2,8 @@ use std::fmt::{Debug, Formatter};
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::{thread, vec};
+use std::time::Instant;
 //use std::thread;
 use image::{ImageBuffer, Rgb};
 use rustls::{ClientConnection, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
@@ -12,10 +14,12 @@ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use simple_image_interface::simple_image_interface::SimpleImageInterface;
 use v4l::Device;
 use v4l::video::Capture;
+use pv_recorder::PvRecorderBuilder;
 
 const DEVICE_NAME: &'static str = "/dev/video0";
 const FPS: u32 = 30;
 const JPEG_COMPRESS_QUALITY: i32 = 25;
+const PV_RECORDER_FRAME_LENGTH: i32 = 512;
 
 fn main() {
     let mut interface: SimpleImageInterface;
@@ -24,6 +28,8 @@ fn main() {
 
     interface = SimpleImageInterface::new_camera(DEVICE_NAME, webcam_width, webcam_height, FPS);
 
+    let sound_recorder = PvRecorderBuilder::new(PV_RECORDER_FRAME_LENGTH).init().unwrap();
+    sound_recorder.start().unwrap();
 
     const HOST: &'static str = "localhost";
     let mut root_store = RootCertStore::empty();
@@ -56,18 +62,31 @@ fn main() {
 
     loop {
         let input_image = interface.get_frame();
-        if input_image.is_none() {
+        if input_image.is_none() || !sound_recorder.is_recording() {
             break;
         }
+        let start = Instant::now();
+        let sound_frame = (0..2).fold(Vec::new(), |mut acc, _| {
+            acc.append(&mut sound_recorder.read().unwrap());
+            acc
+        });
+        println!("Sound frame time: {}", start.elapsed().as_millis());
+        println!("Sound frame size: {}", sound_frame.len());
         let input_image = input_image.unwrap();
-        let input_image: ImageBuffer<Rgb<u8>, Vec<u8>> = image::ImageBuffer::from_raw(webcam_width, webcam_height, input_image.as_raw().as_slice().to_vec()).unwrap();
+        let input_image: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(webcam_width, webcam_height, input_image.as_raw().as_slice().to_vec()).unwrap();
         let compressed_image = turbojpeg::compress_image(&input_image, JPEG_COMPRESS_QUALITY, turbojpeg::Subsamp::Sub2x2).unwrap();
         println!("Compressed size: {}", compressed_image.len());
-        tls.write_all(&compressed_image).unwrap();
+        let audio_video_packet = qkd_camera_common_lib::VideoAudioPacket {
+            compressed_image: compressed_image.to_vec(),
+            sound_frame,
+            sound_sample_rate: sound_recorder.sample_rate() as u32,
+        };
+        let packet_to_send = postcard::to_allocvec(&audio_video_packet).unwrap();
+        tls.write_all(&packet_to_send).unwrap();
         //thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
-
     }
 
+    sound_recorder.stop().unwrap();
     conn.send_close_notify();
     conn.complete_io(&mut sock).unwrap();
 }

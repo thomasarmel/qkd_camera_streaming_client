@@ -2,6 +2,7 @@ use std::io::Read;
 use std::net::TcpStream;
 use std::sync::Arc;
 use image::{ImageBuffer, Rgb};
+use rodio::Sink;
 use rustls::server::Acceptor;
 use rustls::{ServerConfig, ServerConnection};
 use rustls::qkd_config::{QkdInitialServerConfig};
@@ -37,6 +38,8 @@ fn main() {
 fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
 
     let window = create_window("image", Default::default()).unwrap();
+    let (_stream, audio_output_stream_handle) = rodio::OutputStream::try_default().unwrap();
+    let sink = Sink::try_new(&audio_output_stream_handle).unwrap();
 
     loop {
         while let Ok(size_read) = conn.read_tls(&mut stream) {
@@ -59,7 +62,15 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
 
         conn.complete_io(&mut stream).unwrap();
 
-        let decompressed_image: ImageBuffer<Rgb<u8>, Vec<u8>> = match turbojpeg::decompress_image(&read_vec) {
+        let video_audio_packet: qkd_camera_common_lib::VideoAudioPacket = match postcard::from_bytes(&read_vec) {
+            Ok(packet) => packet,
+            Err(e) => {
+                println!("Error deserializing packet: {}", e);
+                continue;
+            }
+        };
+
+        let decompressed_image: ImageBuffer<Rgb<u8>, Vec<u8>> = match turbojpeg::decompress_image(&video_audio_packet.compressed_image) {
             Ok(image) => image,
             Err(e) => {
                 println!("Error decompressing image: {}", e);
@@ -69,8 +80,12 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
         let (width, height) = decompressed_image.dimensions();
         let image = ImageView::new(ImageInfo::rgb8(width, height), decompressed_image.as_raw());
         window.set_image("image-001", image).unwrap();
-    }
 
+
+        let audio_buffer = rodio::buffer::SamplesBuffer::new(1, video_audio_packet.sound_sample_rate, video_audio_packet.sound_frame);
+        sink.append(audio_buffer);
+    }
+    sink.sleep_until_end();
     let _ = window.run_function_wait(|window_handle| {
         window_handle.destroy();
     });

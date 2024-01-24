@@ -14,6 +14,10 @@ path = "src/client/main.rs"
 name = "server"
 path = "src/server/main.rs"
 
+[lib]
+name = "qkd_camera_common_lib"
+path = "src/common_lib/lib.rs"
+
 [dependencies]
 simple_image_interface = { git = "https://github.com/thomasarmel/simple-image-interface-rs.git" }
 v4l = "0.14.0"
@@ -22,7 +26,12 @@ simplelog = "0.12.1"
 show-image = "0.13.1"
 turbojpeg = { version = "0.5.4", features = ["image"] }
 rustls = { features = ["default"], git = "https://github.com/thomasarmel/rustls.git", branch = "qkd"}
+#rustls = { path = "../rustls/rustls", features = ["default"] }
 rustls-pki-types = "1.1.0"
-rustls-native-certs = "0.7.0"
 rcgen = "0.12.0"
 webpki-roots = "0.26.0"
+pv_recorder = "1.2.1"
+serde = {version = "1.0.195", features = ["derive"]}
+postcard = {version = "1.0.8", features = ["alloc"]}
+rodio = "0.17.3"
+audio_overlay = "0.1.5"
