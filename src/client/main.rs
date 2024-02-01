@@ -15,6 +15,7 @@ use simple_image_interface::simple_image_interface::SimpleImageInterface;
 use v4l::Device;
 use v4l::video::Capture;
 use pv_recorder::PvRecorderBuilder;
+use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 
 const DEVICE_NAME: &'static str = "/dev/video0";
 const FPS: u32 = 30;
@@ -70,20 +71,30 @@ fn main() {
             acc.append(&mut sound_recorder.read().unwrap());
             acc
         });
-        println!("Sound frame time: {}", start.elapsed().as_millis());
-        println!("Sound frame size: {}", sound_frame.len());
+        //println!("Sound frame time: {}", start.elapsed().as_millis());
+        //println!("Sound frame size: {}", sound_frame.len());
         let input_image = input_image.unwrap();
         let input_image: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(webcam_width, webcam_height, input_image.as_raw().as_slice().to_vec()).unwrap();
         let compressed_image = turbojpeg::compress_image(&input_image, JPEG_COMPRESS_QUALITY, turbojpeg::Subsamp::Sub2x2).unwrap();
-        println!("Compressed size: {}", compressed_image.len());
+        //println!("Compressed size: {}", compressed_image.len());
         let audio_video_packet = qkd_camera_common_lib::VideoAudioPacket {
             compressed_image: compressed_image.to_vec(),
             sound_frame,
             sound_sample_rate: sound_recorder.sample_rate() as u32,
         };
-        let packet_to_send = postcard::to_allocvec(&audio_video_packet).unwrap();
-        tls.write_all(&packet_to_send).unwrap();
-        //thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
+        let mut packet_to_send = postcard::to_allocvec(&audio_video_packet).unwrap();
+        let packet_size: usize = packet_to_send.len();
+        let nb_chunk: usize = packet_size / PACKET_CHUNK_SIZE + 1;
+        //println!("Packet size: {}: {} chunks", packet_size, nb_chunk);
+        tls.write_all(&[packet_size.to_be_bytes(), nb_chunk.to_be_bytes()].concat()).unwrap();
+        tls.flush().unwrap();
+
+        for packet_chunk in packet_to_send.chunks(PACKET_CHUNK_SIZE) {
+            tls.write_all(packet_chunk).unwrap();
+            tls.flush().unwrap();
+        }
+
+        thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
     }
 
     sound_recorder.stop().unwrap();

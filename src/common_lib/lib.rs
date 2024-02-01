@@ -6,3 +6,6 @@ pub struct VideoAudioPacket {
     pub sound_frame: Vec<i16>,
     pub sound_sample_rate: u32,
 }
+
+/// Size of sent packet chunks, in order to avoid sending too big packets that could overflow the server's buffer
+pub const PACKET_CHUNK_SIZE: usize = 8192;

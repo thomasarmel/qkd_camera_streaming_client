@@ -9,6 +9,7 @@ use rustls::qkd_config::{QkdInitialServerConfig};
 use rustls::server::qkd::QkdServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use show_image::{create_window, ImageInfo, ImageView};
+use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 
 
 #[show_image::main]
@@ -42,25 +43,47 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
     let sink = Sink::try_new(&audio_output_stream_handle).unwrap();
 
     loop {
-        while let Ok(size_read) = conn.read_tls(&mut stream) {
-            conn.process_new_packets().unwrap();
-            if size_read == 0 {
-                println!("EOF");
+        const USIZE_SIZE: usize = std::mem::size_of::<usize>();
+        const PACKET_ANNOUNCE_SIZE: usize = USIZE_SIZE * 2; // packet size + nb chunks
+
+        let mut packet_size_and_nb_chunks_buf = [0u8; PACKET_ANNOUNCE_SIZE];
+        let received_plaintext_size = match conn.read_tls(&mut stream) {
+            Ok(size) => size,
+            Err(e) => {
+                eprintln!("Error reading TLS: {}", e);
                 break;
             }
-            println!("Read {} bytes", size_read);
-        }
+        };
+        let packet_process_result = conn.process_new_packets().unwrap();
 
-        //conn.process_new_packets().unwrap();
-        let mut read_vec = Vec::new();
-        let _ = conn.reader().read_to_end(&mut read_vec);
-        println!("Vec read {} bytes", read_vec.len());
-        if read_vec.len() == 0 {
+        if packet_process_result.plaintext_bytes_to_read() < PACKET_ANNOUNCE_SIZE {
             println!("Client disconnected");
             break;
         }
 
-        conn.complete_io(&mut stream).unwrap();
+        let mut read_vec = vec![0u8; received_plaintext_size];
+        conn.reader().read(&mut read_vec).unwrap();
+
+        packet_size_and_nb_chunks_buf.clone_from_slice(&read_vec[..PACKET_ANNOUNCE_SIZE]);
+
+        let packet_size = usize::from_be_bytes(packet_size_and_nb_chunks_buf[..USIZE_SIZE].try_into().unwrap());
+        let nb_chunks = usize::from_be_bytes(packet_size_and_nb_chunks_buf[USIZE_SIZE..PACKET_ANNOUNCE_SIZE].try_into().unwrap());
+        //println!("Expecting {} bytes: {} chunks", packet_size, nb_chunks);
+
+        let mut read_vec = Vec::with_capacity(packet_size);
+        let mut packet_size_remaining = packet_size;
+        for _ in 0..nb_chunks {
+            let expected_chunk_size = std::cmp::min(packet_size_remaining, PACKET_CHUNK_SIZE);
+            let mut chunk_vec = match read_stream_data(&mut conn, &mut stream, expected_chunk_size) {
+                Ok(vec) => vec,
+                Err(_) => {
+                    println!("Client disconnected");
+                    break;
+                }
+            };
+            packet_size_remaining -= expected_chunk_size;
+            read_vec.append(&mut chunk_vec);
+        }
 
         let video_audio_packet: qkd_camera_common_lib::VideoAudioPacket = match postcard::from_bytes(&read_vec) {
             Ok(packet) => packet,
@@ -89,6 +112,27 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
     let _ = window.run_function_wait(|window_handle| {
         window_handle.destroy();
     });
+}
+
+fn read_stream_data(conn: &mut ServerConnection, stream: &mut TcpStream, size_to_read: usize) -> Result<Vec<u8>, ()> {
+    while let Ok(size_read) = conn.read_tls(stream) {
+        let t = conn.process_new_packets().unwrap();
+        //println!("process result: {:?}", t);
+        if t.plaintext_bytes_to_read() >= size_to_read {
+            //println!("Enough bytes read");
+            break;
+        }
+        if size_read == 0 {
+            println!("EOF");
+            return Err(());
+        }
+        //println!("Read {} bytes", size_read);
+    }
+
+    let mut read_vec = vec![0u8; size_to_read];
+    let _ = conn.reader().read_exact(&mut read_vec).unwrap();
+    //println!("Vec read {} bytes", read_vec.len());
+    Ok(read_vec)
 }
 
 struct TestPki {
