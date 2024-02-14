@@ -1,10 +1,8 @@
 use std::fmt::{Debug, Formatter};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
-use std::{thread, vec};
-use std::time::Instant;
-//use std::thread;
+use std::vec;
 use image::{ImageBuffer, Rgb};
 use rustls::{ClientConnection, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -46,7 +44,7 @@ fn main() {
                 "localhost:3000",
                 "data/sae1.pfx",
                 "",
-                2
+                3
             )).unwrap();
         /*.dangerous()
         .with_custom_certificate_verifier(Arc::new(NoVerifier {}))
@@ -55,18 +53,33 @@ fn main() {
     // Allow using SSLKEYLOGFILE.
     config.key_log = Arc::new(rustls::KeyLogFile::new());
 
-    let server_name = HOST.try_into().unwrap();
-    let mut conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
-    let mut sock = TcpStream::connect(format!("{}:4443", HOST)).unwrap();
-    let mut tls = rustls::Stream::new(&mut conn, &mut sock);
+    let server_name: ServerName = HOST.try_into().unwrap();
 
+    let mut conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
+    let mut sock = match TcpStream::connect(format!("{}:4443", HOST)) {
+        Ok(sock) => sock,
+        Err(e) => {
+            eprintln!("Error connecting to server: {}", e);
+            return;
+        }
+    };
+    let mut tls = rustls::Stream::new(&mut conn, &mut sock);
+    tls.conn.complete_io(&mut tls.sock).unwrap();
+
+    for _ in 0..10 {
+        let input_image = interface.get_frame();
+        let test = sound_recorder.read();
+        std::thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
+        println!("Sound frame size: {}", test.unwrap().len());
+        println!("Image size: {}", input_image.unwrap().len());
+    } // Just to ensure image is well initialized
 
     loop {
         let input_image = interface.get_frame();
         if input_image.is_none() || !sound_recorder.is_recording() {
-            break;
+            eprintln!("Error getting frame or sound recorder not recording, disconnecting client...");
+            return;
         }
-        let start = Instant::now();
         let sound_frame = (0..2).fold(Vec::new(), |mut acc, _| {
             acc.append(&mut sound_recorder.read().unwrap());
             acc
@@ -82,24 +95,64 @@ fn main() {
             sound_frame,
             sound_sample_rate: sound_recorder.sample_rate() as u32,
         };
-        let mut packet_to_send = postcard::to_allocvec(&audio_video_packet).unwrap();
+        let packet_to_send = postcard::to_allocvec(&audio_video_packet).unwrap();
         let packet_size: usize = packet_to_send.len();
         let nb_chunk: usize = packet_size / PACKET_CHUNK_SIZE + 1;
         //println!("Packet size: {}: {} chunks", packet_size, nb_chunk);
-        tls.write_all(&[packet_size.to_be_bytes(), nb_chunk.to_be_bytes()].concat()).unwrap();
-        tls.flush().unwrap();
-
-        for packet_chunk in packet_to_send.chunks(PACKET_CHUNK_SIZE) {
-            tls.write_all(packet_chunk).unwrap();
-            tls.flush().unwrap();
+        if tls.write_all(&[packet_size.to_be_bytes(), nb_chunk.to_be_bytes(), usize::MAX.to_be_bytes()].concat()).is_err() {
+            eprintln!("Error writing packet size, disconnecting client...");
+            break;
+        }
+        //println!("{}", tls.conn.wants_read());
+        //println!("{:?}", tls.conn.read_tls(&mut tls.sock));
+        tls.conn.write_tls(&mut tls.sock).unwrap();
+        if tls.flush().is_err() {
+            eprintln!("Error flushing data, disconnecting client...");
+            break;
         }
 
-        thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
+        for packet_chunk in packet_to_send.chunks(PACKET_CHUNK_SIZE) {
+            if tls.write_all(packet_chunk).is_err() {
+                eprintln!("Error writing packet chunk, disconnecting client...");
+                break;
+            }
+            if tls.flush().is_err() {
+                eprintln!("Error flushing data, disconnecting client...");
+                break;
+            }
+            if tls.conn.write_tls(&mut tls.sock).is_err() {
+                eprintln!("Error writing TLS, disconnecting client...");
+                break;
+            }
+        }
+        //tls.conn.complete_io(&mut tls.sock).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
+        if tls.conn.read_tls(&mut tls.sock).is_err() {
+            eprintln!("Error reading TLS for ACK, disconnecting client...");
+            break;
+        }
+        tls.conn.process_new_packets().unwrap();
+        let mut buf = [0u8; 3];
+        tls.conn.reader().read(&mut buf).unwrap();
+        if &buf != b"ACK" {
+            eprintln!("Warning: Invalid ACK, disconnecting client...");
+        }
+
+        //std::thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
+        /*println!("{:?}", tls.conn.read_tls(&mut tls.sock));
+        tls.conn.process_new_packets().unwrap();
+        let mut buf = [0u8; 25];
+        tls.conn.reader().read(&mut buf).unwrap();
+        println!("{:?}", buf);
+        println!("Wants read: {}", tls.conn.wants_read());
+        println!("Wants write: {}", tls.conn.wants_write());
+        println!("{:?}", tls.conn.read_tls(&mut tls.sock));*/
+        //tls.conn.complete_io(&mut tls.sock).unwrap();
     }
 
     sound_recorder.stop().unwrap();
     conn.send_close_notify();
-    conn.complete_io(&mut sock).unwrap();
+    let _ = conn.complete_io(&mut sock);
 }
 
 fn get_webcam_format(device_name: &str) -> (u32, u32) {

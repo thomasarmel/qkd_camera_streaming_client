@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 use image::{ImageBuffer, Rgb};
@@ -11,6 +11,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use show_image::{create_window, ImageInfo, ImageView};
 use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 
+const MAX_ACCEPTABLE_IMAGE_SIZE: usize = 10_000_000;
 
 #[show_image::main]
 fn main() {
@@ -30,6 +31,7 @@ fn main() {
 
         let conn = accepted.into_qkd_connection(server_config.clone()).unwrap();
         let mut conn = conn.complete_qkd_ack(&mut stream.try_clone().unwrap(), &mut stream.try_clone().unwrap());
+        //let mut conn = accepted.into_connection(server_config.clone()).unwrap();
         conn.complete_io(&mut stream).unwrap();
 
         manage_stream(conn, stream);
@@ -44,7 +46,7 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
 
     loop {
         const USIZE_SIZE: usize = std::mem::size_of::<usize>();
-        const PACKET_ANNOUNCE_SIZE: usize = USIZE_SIZE * 2; // packet size + nb chunks
+        const PACKET_ANNOUNCE_SIZE: usize = USIZE_SIZE * 3; // packet size + nb chunks
 
         let mut packet_size_and_nb_chunks_buf = [0u8; PACKET_ANNOUNCE_SIZE];
         let received_plaintext_size = match conn.read_tls(&mut stream) {
@@ -67,7 +69,12 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
         packet_size_and_nb_chunks_buf.clone_from_slice(&read_vec[..PACKET_ANNOUNCE_SIZE]);
 
         let packet_size = usize::from_be_bytes(packet_size_and_nb_chunks_buf[..USIZE_SIZE].try_into().unwrap());
-        let nb_chunks = usize::from_be_bytes(packet_size_and_nb_chunks_buf[USIZE_SIZE..PACKET_ANNOUNCE_SIZE].try_into().unwrap());
+        let nb_chunks = usize::from_be_bytes(packet_size_and_nb_chunks_buf[USIZE_SIZE..(USIZE_SIZE * 2)].try_into().unwrap());
+        let control_bytes = usize::from_be_bytes(packet_size_and_nb_chunks_buf[(USIZE_SIZE * 2)..PACKET_ANNOUNCE_SIZE].try_into().unwrap());
+        if control_bytes != usize::MAX {
+            eprintln!("Invalid Control bytes not MAX: {}, disconnecting client...", control_bytes);
+            break;
+        }
         //println!("Expecting {} bytes: {} chunks", packet_size, nb_chunks);
 
         let mut read_vec = Vec::with_capacity(packet_size);
@@ -88,15 +95,38 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
         let video_audio_packet: qkd_camera_common_lib::VideoAudioPacket = match postcard::from_bytes(&read_vec) {
             Ok(packet) => packet,
             Err(e) => {
-                println!("Error deserializing packet: {}", e);
+                eprintln!("Error deserializing packet: {}", e);
                 continue;
             }
         };
 
-        let decompressed_image: ImageBuffer<Rgb<u8>, Vec<u8>> = match turbojpeg::decompress_image(&video_audio_packet.compressed_image) {
+        conn.writer().write(b"ACK").unwrap();
+        conn.writer().flush().unwrap();
+        if conn.write_tls(&mut stream).is_err() {
+            eprintln!("Error writing TLS ACK, disconnecting client...");
+            break;
+        }
+        //println!("{:?}", conn.complete_io(&mut stream));
+
+        let compressed_image_data = video_audio_packet.compressed_image.as_slice();
+        let image_header = match turbojpeg::read_header(compressed_image_data) {
+            Ok(header) => header,
+            Err(e) => {
+                eprintln!("Error reading image header: {}", e);
+                continue;
+            }
+        };
+        let image_allocated_space = image_header.width * image_header.height * image_header.colorspace as usize;
+
+        if image_allocated_space > MAX_ACCEPTABLE_IMAGE_SIZE {
+            eprintln!("Image too big: {} bytes", image_allocated_space);
+            continue;
+        }
+
+        let decompressed_image: ImageBuffer<Rgb<u8>, Vec<u8>> = match turbojpeg::decompress_image(compressed_image_data) {
             Ok(image) => image,
             Err(e) => {
-                println!("Error decompressing image: {}", e);
+                eprintln!("Error decompressing image: {}", e);
                 continue;
             }
         };
@@ -115,22 +145,27 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
 }
 
 fn read_stream_data(conn: &mut ServerConnection, stream: &mut TcpStream, size_to_read: usize) -> Result<Vec<u8>, ()> {
-    while let Ok(size_read) = conn.read_tls(stream) {
-        let t = conn.process_new_packets().unwrap();
-        //println!("process result: {:?}", t);
-        if t.plaintext_bytes_to_read() >= size_to_read {
-            //println!("Enough bytes read");
-            break;
+    let last_connection_state = conn.process_new_packets().unwrap();
+    if last_connection_state.plaintext_bytes_to_read() < size_to_read {
+        //println!("Trying to read {} bytes... {}", size_to_read, conn.wants_read());
+        while let Ok(size_read) = conn.read_tls(stream) {
+            let t = conn.process_new_packets().unwrap();
+            //println!("process result: {:?}", t);
+            if t.plaintext_bytes_to_read() >= size_to_read {
+                //println!("Enough bytes read");
+                break;
+            }
+            if size_read == 0 {
+                println!("EOF");
+                return Err(());
+            }
+            //println!("Read {} bytes", size_read);
         }
-        if size_read == 0 {
-            println!("EOF");
-            return Err(());
-        }
-        //println!("Read {} bytes", size_read);
     }
 
     let mut read_vec = vec![0u8; size_to_read];
-    let _ = conn.reader().read_exact(&mut read_vec).unwrap();
+    //let _ = conn.reader().read_exact(&mut read_vec).unwrap();
+    let _ = conn.reader().read(&mut read_vec).unwrap();
     //println!("Vec read {} bytes", read_vec.len());
     Ok(read_vec)
 }
@@ -178,15 +213,16 @@ impl TestPki {
     }
 
     fn server_config(self) -> Arc<QkdServerConfig> {
-        let mut server_config = ServerConfig::builder()
+        let server_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_qkd_and_single_cert(vec![self.server_cert_der], self.server_key_der, &QkdInitialServerConfig::new (
-            "localhost:3000",
-            "data/sae2.pfx",
+            "localhost:4000",
+            "data/sae3.pfx",
             "",
             )).unwrap();
+            //.with_single_cert(vec![self.server_cert_der], self.server_key_der).unwrap();
 
-        server_config.set_key_log(Arc::new(rustls::KeyLogFile::new()));
+        //server_config.set_key_log(Arc::new(rustls::KeyLogFile::new()));
 
         Arc::new(server_config)
     }

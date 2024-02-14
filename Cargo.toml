@@ -26,6 +26,7 @@ simplelog = "0.12.1"
 show-image = "0.13.1"
 turbojpeg = { version = "0.5.4", features = ["image"] }
 rustls = { features = ["default"], git = "https://github.com/thomasarmel/rustls.git", branch = "qkd"}
+#rustls = { version = "0.22.2", features = ["default"] }
 #rustls = { path = "../rustls/rustls", features = ["default"] }
 rustls-pki-types = "1.1.0"
 rcgen = "0.12.0"
