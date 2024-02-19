@@ -6,40 +6,26 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::vec;
-/*use eye_hal::PlatformContext;
-use eye_hal::traits::{Context, Device, Stream};*/
-use image::{Frame, ImageBuffer, Rgb};
 use rustls::{ClientConnection, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::qkd_config::QkdClientConfig;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
-//use simple_image_interface::simple_image_interface::SimpleImageInterface;
-//use v4l::Device;
-//use v4l::video::Capture;
 use pv_recorder::PvRecorderBuilder;
 use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 use crate::camera::Camera;
 
-//const DEVICE_NAME: &'static str = "/dev/video0";
 const FPS: u32 = 30;
 const JPEG_COMPRESS_QUALITY: i32 = 25;
 const PV_RECORDER_FRAME_LENGTH: i32 = 512;
 
 fn main() {
-
-    /*let index = CameraIndex::Index(0);
-    // request the absolute highest resolution CameraFormat that can be decoded to RGB.
-    let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
-    // make the camera
-    let mut camera = Camera::new(index, requested).unwrap();
-    camera.set_frame_format(FrameFormat::NV12).unwrap();
-    camera.open_stream().unwrap();*/
     #[cfg(target_os = "linux")]
     let mut camera = linux_camera::LinuxCamera::new();
+    #[cfg(target_os = "windows")]
+    compile_error!("Windows is not yet supported");
 
     let sound_recorder = PvRecorderBuilder::new(PV_RECORDER_FRAME_LENGTH).init().unwrap();
-    sound_recorder.start().unwrap();
 
     const HOST: &'static str = "localhost";
     let mut root_store = RootCertStore::empty();
@@ -77,22 +63,9 @@ fn main() {
     let mut tls = rustls::Stream::new(&mut conn, &mut sock);
     tls.conn.complete_io(&mut tls.sock).unwrap();
 
-    /*for _ in 0..10 {
-        //let input_image = interface.get_frame();
-        let frame = camera.frame().unwrap();
-        let test = sound_recorder.read();
-        std::thread::sleep(std::time::Duration::from_millis(1000 / FPS as u64));
-        println!("Sound frame size: {}", test.unwrap().len());
-        //println!("Image size: {}", input_image.unwrap().len());
-    } // Just to ensure image is well initialized*/
+    sound_recorder.start().unwrap();
 
     loop {
-        //let input_image = interface.get_frame();
-        //let frame = camera.frame().unwrap();
-        /*let frame = &camera.frame_raw().unwrap().to_vec()[..1382400];
-        let buffer = Buffer::new(camera.resolution(), frame, camera.frame_format());*/
-        //let input_image = frame.decode_image::<RgbFormat>().unwrap();
-        let input_image = camera.get_frame();
         if /*input_image.is_none() ||*/ !sound_recorder.is_recording() {
             eprintln!("Error getting frame or sound recorder not recording, disconnecting client...");
             return;
@@ -101,12 +74,9 @@ fn main() {
             acc.append(&mut sound_recorder.read().unwrap());
             acc
         });
+        let input_image = camera.get_frame();
         //println!("Sound frame time: {}", start.elapsed().as_millis());
         //println!("Sound frame size: {}", sound_frame.len());
-        let webcam_width = input_image.width();
-        let webcam_height = input_image.height();
-        //let input_image = input_image.unwrap();
-        //let input_image: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(webcam_width, webcam_height, input_image.to_vec()).unwrap();
         let compressed_image = turbojpeg::compress_image(&input_image, JPEG_COMPRESS_QUALITY, turbojpeg::Subsamp::Sub2x2).unwrap();
         //println!("Compressed size: {}", compressed_image.len());
         let audio_video_packet = qkd_camera_common_lib::VideoAudioPacket {

@@ -24,7 +24,7 @@ impl LinuxCamera {
 impl Camera for LinuxCamera {
 
     fn new() -> Self {
-        let mut interface: SimpleImageInterface;
+        let interface: SimpleImageInterface;
         let (webcam_width, webcam_height) = Self::get_webcam_format(Self::DEVICE_NAME);
         interface = SimpleImageInterface::new_camera(Self::DEVICE_NAME, webcam_width, webcam_height, Self::FPS);
         Self{

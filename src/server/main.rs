@@ -100,6 +100,9 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
             }
         };
 
+        let audio_buffer = rodio::buffer::SamplesBuffer::new(1, video_audio_packet.sound_sample_rate, video_audio_packet.sound_frame);
+        sink.append(audio_buffer);
+
         conn.writer().write(b"ACK").unwrap();
         conn.writer().flush().unwrap();
         if conn.write_tls(&mut stream).is_err() {
@@ -134,9 +137,6 @@ fn manage_stream(mut conn: ServerConnection, mut stream: TcpStream) {
         let image = ImageView::new(ImageInfo::rgb8(width, height), decompressed_image.as_raw());
         window.set_image("image-001", image).unwrap();
 
-
-        let audio_buffer = rodio::buffer::SamplesBuffer::new(1, video_audio_packet.sound_sample_rate, video_audio_packet.sound_frame);
-        sink.append(audio_buffer);
     }
     sink.sleep_until_end();
     let _ = window.run_function_wait(|window_handle| {
