@@ -11,7 +11,7 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::qkd_config::QkdClientConfig;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
-use pv_recorder::PvRecorderBuilder;
+use pv_recorder::{PvRecorder, PvRecorderBuilder};
 use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 use crate::camera::Camera;
 
@@ -64,6 +64,16 @@ fn main() {
     tls.conn.complete_io(&mut tls.sock).unwrap();
 
     sound_recorder.start().unwrap();
+
+    match init_audio_capture_sync(&sound_recorder, 100) {
+        Ok(sync_duration) => {
+            println!("Audio capture synchronized in {} ms", sync_duration.as_millis());
+        },
+        Err(_) => {
+            println!("Warning: audio capture could be not well synchronized...");
+        }
+    }
+
 
     loop {
         if /*input_image.is_none() ||*/ !sound_recorder.is_recording() {
@@ -142,6 +152,32 @@ fn main() {
     sound_recorder.stop().unwrap();
     conn.send_close_notify();
     let _ = conn.complete_io(&mut sock);
+}
+
+/// Ensure that audio is synchronized with video by reading audio chunks until capture is initialized
+fn init_audio_capture_sync(sound_recorder: &PvRecorder, max_read_loops: usize) -> Result<std::time::Duration, ()> {
+    // Read ellasped time factor meaning that audio capture is initialized
+    const READ_TIME_THRESHOLD: usize = 100;
+
+    let mut previous_time: u128 = 0;
+    let mut correctly_initialized = false;
+    let whole_sync_start = std::time::Instant::now();
+    for _ in (0..max_read_loops) {
+        let read_start = std::time::Instant::now();
+        sound_recorder.read().unwrap();
+        let read_time =  read_start.elapsed().as_micros();
+        if read_time * (READ_TIME_THRESHOLD as u128) < previous_time {
+            correctly_initialized = true;
+            break;
+        }
+        previous_time = read_time;
+    }
+    let whole_sync_duration = whole_sync_start.elapsed();
+    if correctly_initialized {
+        Ok(whole_sync_duration)
+    } else {
+        Err(())
+    }
 }
 
 struct NoVerifier {}
