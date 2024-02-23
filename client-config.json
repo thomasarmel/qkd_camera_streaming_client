@@ -4,5 +4,6 @@
   "kme_authentication_certificate_password": "",
   "target_sae_host": "localhost",
   "target_sae_port": 14443,
-  "target_sae_id": 3
+  "target_sae_id": 3,
+  "danger_accept_invalid_kme_cert": true
 }

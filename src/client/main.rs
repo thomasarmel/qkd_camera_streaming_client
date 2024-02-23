@@ -28,6 +28,7 @@ struct JsonClientConfig {
     target_sae_host: String,
     target_sae_port: u16,
     target_sae_id: i64,
+    danger_accept_invalid_kme_cert: bool,
 }
 
 fn main() {
@@ -62,6 +63,7 @@ fn main() {
                 client_config.kme_authentication_certificate_path.as_str(),
                 client_config.kme_authentication_certificate_password.as_str(),
                 client_config.target_sae_id,
+                client_config.danger_accept_invalid_kme_cert
             )).unwrap();
         /*.dangerous()
         .with_custom_certificate_verifier(Arc::new(NoVerifier {}))

@@ -20,6 +20,7 @@ struct JsonServerConfig {
     kme_authentication_certificate_path: String,
     kme_authentication_certificate_password: String,
     binding_address: String,
+    danger_accept_invalid_kme_cert: bool,
 }
 
 
@@ -238,6 +239,7 @@ impl TestPki {
                 json_config.kme_address.as_str(),
                 json_config.kme_authentication_certificate_path.as_str(),
                 json_config.kme_authentication_certificate_password.as_str(),
+                json_config.danger_accept_invalid_kme_cert
             )).unwrap();
         //.with_single_cert(vec![self.server_cert_der], self.server_key_der).unwrap();
 
