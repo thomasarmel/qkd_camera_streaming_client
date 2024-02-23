@@ -32,6 +32,7 @@ fn main() {
     let client_config: JsonClientConfig = serde_json::from_str(&client_config_str).unwrap();
 
     let jpeg_quality = client_config.override_default_video_jpeg_quality.unwrap_or_else(|| DEFAULT_JPEG_COMPRESS_QUALITY);
+    let audio_frame_accumulator_length = client_config.override_default_audio_frame_accumulator_length.unwrap_or_else(|| json_client_config::DEFAULT_AUDIO_FRAME_ACCUMULATOR_LENGTH);
 
     #[cfg(target_os = "linux")]
     let mut camera = linux_camera::LinuxCamera::new(&client_config);
@@ -95,7 +96,7 @@ fn main() {
             eprintln!("Error getting frame or sound recorder not recording, disconnecting client...");
             return;
         }
-        let sound_frame = (0..2).fold(Vec::new(), |mut acc, _| {
+        let sound_frame = (0..audio_frame_accumulator_length).fold(Vec::new(), |mut acc, _| {
             acc.append(&mut sound_recorder.read().unwrap());
             acc
         });
@@ -180,7 +181,7 @@ fn init_audio_capture_sync(sound_recorder: &PvRecorder, max_read_loops: usize) -
     for _ in 0..max_read_loops {
         let read_start = std::time::Instant::now();
         sound_recorder.read().unwrap();
-        let read_time =  read_start.elapsed().as_micros();
+        let read_time = read_start.elapsed().as_micros();
         if read_time * (READ_TIME_THRESHOLD as u128) < previous_time {
             correctly_initialized = true;
             break;

@@ -2,6 +2,8 @@ use serde::Deserialize;
 
 pub(crate) const DEFAULT_CAMERA_DEVICE_NAME: &'static str = "/dev/video0";
 pub(crate) const DEFAULT_CAMERA_FPS: u32 = 30;
+/// How many audio frames og length 512 to accumulate before sending them to the server
+pub(crate) const DEFAULT_AUDIO_FRAME_ACCUMULATOR_LENGTH: usize = 2;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct JsonClientConfig {
@@ -16,6 +18,7 @@ pub(crate) struct JsonClientConfig {
     pub(crate) override_default_camera_fps: Option<u32>,
     pub(crate) override_default_video_jpeg_quality: Option<i32>,
     pub(crate) override_default_camera_device: Option<String>,
+    pub(crate) override_default_audio_frame_accumulator_length: Option<usize>
 }
 
 #[derive(Debug, Deserialize)]
