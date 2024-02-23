@@ -3,6 +3,7 @@ use v4l::Device;
 use crate::camera::Camera;
 use simple_image_interface::simple_image_interface::SimpleImageInterface;
 use v4l::video::Capture;
+use crate::json_client_config::{DEFAULT_CAMERA_DEVICE_NAME, DEFAULT_CAMERA_FPS, JsonClientConfig};
 
 pub(crate) struct LinuxCamera {
     interface: SimpleImageInterface,
@@ -11,9 +12,6 @@ pub(crate) struct LinuxCamera {
 }
 
 impl LinuxCamera {
-
-    const DEVICE_NAME: &'static str = "/dev/video0";
-    const FPS: u32 = 30;
     fn get_webcam_format(device_name: &str) -> (u32, u32) {
         let dev = Device::with_path(device_name);
         let format = dev.unwrap().format().unwrap();
@@ -23,10 +21,22 @@ impl LinuxCamera {
 
 impl Camera for LinuxCamera {
 
-    fn new() -> Self {
+    fn new(client_config: &JsonClientConfig) -> Self {
         let interface: SimpleImageInterface;
-        let (webcam_width, webcam_height) = Self::get_webcam_format(Self::DEVICE_NAME);
-        interface = SimpleImageInterface::new_camera(Self::DEVICE_NAME, webcam_width, webcam_height, Self::FPS);
+        let (webcam_width, webcam_height) = match client_config.override_default_format.as_ref() {
+            Some(override_default_format) => {
+                (override_default_format.width, override_default_format.height)
+            },
+            None => {
+                Self::get_webcam_format(DEFAULT_CAMERA_DEVICE_NAME)
+            }
+        };
+        let camera_fps = client_config.override_default_camera_fps.unwrap_or_else(|| DEFAULT_CAMERA_FPS);
+        let camera_device = match client_config.override_default_camera_device.as_ref() {
+            Some(override_default_camera_device) => override_default_camera_device.as_str(),
+            None => DEFAULT_CAMERA_DEVICE_NAME
+        };
+        interface = SimpleImageInterface::new_camera(camera_device, webcam_width, webcam_height, camera_fps);
         Self{
             interface,
             webcam_width,

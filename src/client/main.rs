@@ -1,5 +1,6 @@
 mod linux_camera;
 mod camera;
+mod json_client_config;
 
 use std::fmt::{Debug, Formatter};
 use std::io::{Read, Write};
@@ -12,24 +13,13 @@ use rustls::qkd_config::QkdClientConfig;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 use pv_recorder::{PvRecorder, PvRecorderBuilder};
-use serde::Deserialize;
 use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 use crate::camera::Camera;
+use crate::json_client_config::JsonClientConfig;
 
-const FPS: u32 = 30;
-const JPEG_COMPRESS_QUALITY: i32 = 25;
+//const FPS: u32 = 30;
+const DEFAULT_JPEG_COMPRESS_QUALITY: i32 = 25;
 const PV_RECORDER_FRAME_LENGTH: i32 = 512;
-
-#[derive(Debug, Deserialize)]
-struct JsonClientConfig {
-    kme_address: String,
-    kme_authentication_certificate_path: String,
-    kme_authentication_certificate_password: String,
-    target_sae_host: String,
-    target_sae_port: u16,
-    target_sae_id: i64,
-    danger_accept_invalid_kme_cert: bool,
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -41,14 +31,15 @@ fn main() {
     let client_config_str = std::fs::read_to_string(&args[1]).unwrap();
     let client_config: JsonClientConfig = serde_json::from_str(&client_config_str).unwrap();
 
+    let jpeg_quality = client_config.override_default_video_jpeg_quality.unwrap_or_else(|| DEFAULT_JPEG_COMPRESS_QUALITY);
+
     #[cfg(target_os = "linux")]
-    let mut camera = linux_camera::LinuxCamera::new();
+    let mut camera = linux_camera::LinuxCamera::new(&client_config);
     #[cfg(target_os = "windows")]
     compile_error!("Windows is not yet supported");
 
     let sound_recorder = PvRecorderBuilder::new(PV_RECORDER_FRAME_LENGTH).init().unwrap();
 
-    const HOST: &'static str = "localhost";
     let mut root_store = RootCertStore::empty();
     root_store.extend(
         webpki_roots::TLS_SERVER_ROOTS
@@ -111,7 +102,7 @@ fn main() {
         let input_image = camera.get_frame();
         //println!("Sound frame time: {}", start.elapsed().as_millis());
         //println!("Sound frame size: {}", sound_frame.len());
-        let compressed_image = turbojpeg::compress_image(&input_image, JPEG_COMPRESS_QUALITY, turbojpeg::Subsamp::Sub2x2).unwrap();
+        let compressed_image = turbojpeg::compress_image(&input_image, jpeg_quality, turbojpeg::Subsamp::Sub2x2).unwrap();
         //println!("Compressed size: {}", compressed_image.len());
         let audio_video_packet = qkd_camera_common_lib::VideoAudioPacket {
             compressed_image: compressed_image.to_vec(),
