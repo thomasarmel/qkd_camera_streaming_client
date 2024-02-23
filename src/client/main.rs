@@ -12,6 +12,7 @@ use rustls::qkd_config::QkdClientConfig;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 use pv_recorder::{PvRecorder, PvRecorderBuilder};
+use serde::Deserialize;
 use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 use crate::camera::Camera;
 
@@ -19,7 +20,26 @@ const FPS: u32 = 30;
 const JPEG_COMPRESS_QUALITY: i32 = 25;
 const PV_RECORDER_FRAME_LENGTH: i32 = 512;
 
+#[derive(Debug, Deserialize)]
+struct JsonClientConfig {
+    kme_address: String,
+    kme_authentication_certificate_path: String,
+    kme_authentication_certificate_password: String,
+    target_sae_host: String,
+    target_sae_port: u16,
+    target_sae_id: i64,
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <client_config.json>", args[0]);
+        std::process::exit(1);
+    }
+
+    let client_config_str = std::fs::read_to_string(&args[1]).unwrap();
+    let client_config: JsonClientConfig = serde_json::from_str(&client_config_str).unwrap();
+
     #[cfg(target_os = "linux")]
     let mut camera = linux_camera::LinuxCamera::new();
     #[cfg(target_os = "windows")]
@@ -38,10 +58,10 @@ fn main() {
         .with_root_certificates(root_store)
         .with_qkd(
             &QkdClientConfig::new(
-                "localhost:3000",
-                "data/sae1.pfx",
-                "",
-                3
+                client_config.kme_address.as_str(),
+                client_config.kme_authentication_certificate_path.as_str(),
+                client_config.kme_authentication_certificate_password.as_str(),
+                client_config.target_sae_id,
             )).unwrap();
         /*.dangerous()
         .with_custom_certificate_verifier(Arc::new(NoVerifier {}))
@@ -50,10 +70,12 @@ fn main() {
     // Allow using SSLKEYLOGFILE.
     config.key_log = Arc::new(rustls::KeyLogFile::new());
 
-    let server_name: ServerName = HOST.try_into().unwrap();
+    let server_sae_host = client_config.target_sae_host;
+    let server_sae_port = client_config.target_sae_port;
+    let server_name: ServerName = server_sae_host.clone().try_into().unwrap();
 
     let mut conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
-    let mut sock = match TcpStream::connect(format!("{}:4443", HOST)) {
+    let mut sock = match TcpStream::connect(format!("{}:{}", server_sae_host, server_sae_port)) {
         Ok(sock) => sock,
         Err(e) => {
             eprintln!("Error connecting to server: {}", e);
@@ -162,7 +184,7 @@ fn init_audio_capture_sync(sound_recorder: &PvRecorder, max_read_loops: usize) -
     let mut previous_time: u128 = 0;
     let mut correctly_initialized = false;
     let whole_sync_start = std::time::Instant::now();
-    for _ in (0..max_read_loops) {
+    for _ in 0..max_read_loops {
         let read_start = std::time::Instant::now();
         sound_recorder.read().unwrap();
         let read_time =  read_start.elapsed().as_micros();

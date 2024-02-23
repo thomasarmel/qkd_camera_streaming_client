@@ -1,0 +1,8 @@
+{
+  "kme_address": "localhost:13000",
+  "kme_authentication_certificate_path": "data/sae1.pfx",
+  "kme_authentication_certificate_password": "",
+  "target_sae_host": "localhost",
+  "target_sae_port": 14443,
+  "target_sae_id": 3
+}

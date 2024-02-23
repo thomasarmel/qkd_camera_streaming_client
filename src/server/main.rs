@@ -8,16 +8,35 @@ use rustls::{ServerConfig, ServerConnection};
 use rustls::qkd_config::{QkdInitialServerConfig};
 use rustls::server::qkd::QkdServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use serde::Deserialize;
 use show_image::{create_window, ImageInfo, ImageView};
 use qkd_camera_common_lib::PACKET_CHUNK_SIZE;
 
 const MAX_ACCEPTABLE_IMAGE_SIZE: usize = 10_000_000;
 
+#[derive(Debug, Deserialize)]
+struct JsonServerConfig {
+    kme_address: String,
+    kme_authentication_certificate_path: String,
+    kme_authentication_certificate_password: String,
+    binding_address: String,
+}
+
+
 #[show_image::main]
 fn main() {
-    let server_config = TestPki::new().server_config();
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <server_config.json>", args[0]);
+        std::process::exit(1);
+    }
 
-    let listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", 4443)).unwrap();
+    let json_server_config_str = std::fs::read_to_string(&args[1]).unwrap();
+    let json_server_config: JsonServerConfig = serde_json::from_str(&json_server_config_str).unwrap();
+
+    let server_config = TestPki::new().server_config(&json_server_config);
+
+    let listener = std::net::TcpListener::bind(json_server_config.binding_address).unwrap();
     for stream in listener.incoming() {
         let mut stream = stream.unwrap();
         let mut acceptor = Acceptor::default();
@@ -212,15 +231,15 @@ impl TestPki {
         }
     }
 
-    fn server_config(self) -> Arc<QkdServerConfig> {
+    fn server_config(self, json_config: &JsonServerConfig) -> Arc<QkdServerConfig> {
         let server_config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_qkd_and_single_cert(vec![self.server_cert_der], self.server_key_der, &QkdInitialServerConfig::new (
-            "localhost:4000",
-            "data/sae3.pfx",
-            "",
+            .with_qkd_and_single_cert(vec![self.server_cert_der], self.server_key_der, &QkdInitialServerConfig::new(
+                json_config.kme_address.as_str(),
+                json_config.kme_authentication_certificate_path.as_str(),
+                json_config.kme_authentication_certificate_password.as_str(),
             )).unwrap();
-            //.with_single_cert(vec![self.server_cert_der], self.server_key_der).unwrap();
+        //.with_single_cert(vec![self.server_cert_der], self.server_key_der).unwrap();
 
         //server_config.set_key_log(Arc::new(rustls::KeyLogFile::new()));
 

@@ -1,0 +1,6 @@
+{
+  "kme_address": "localhost:14000",
+  "kme_authentication_certificate_path": "data/sae3.pfx",
+  "kme_authentication_certificate_password": "",
+  "binding_address": "0.0.0.0:14443"
+}
